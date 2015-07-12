@@ -1,0 +1,62 @@
+---
+- hosts: localhost
+  sudo: yes
+  sudo_user: root
+  remote_user: vagrant
+  vars:
+    keepalived_version:  1.2.18
+  tasks:
+  - apt: name={{item}} state=present
+    with_items:
+    - make
+    - gcc
+    - libssl-dev
+
+  - shell: "keepalived --version"
+    register: current_version
+    changed_when: current_version.rc != 0 or current_version.stderr | regex_replace('.*v(\d+\.\d+\.\d+).*$','\\1') != keepalived_version
+    ignore_errors: True
+
+  - debug: var=current_version
+
+  - name: Download keepalived sources
+    get_url: >
+      url=http://keepalived.org/software/keepalived-{{keepalived_version}}.tar.gz
+      dest=/usr/local/src/keepalived.tar.gz
+      force=True
+    when: current_version|changed
+
+  - name: Wipe "/usr/local/src/keepalived-sources" if dir exists
+    file: path="/usr/local/src/keepalived-sources" state=absent
+    when: current_version|changed
+
+  - name: Assures "/usr/local/src/keepalived-sources" dir exists
+    file: path="/usr/local/src/keepalived-sources" state=directory
+
+  - name: Extract sources
+    command: tar -xzf keepalived.tar.gz --strip 1 -C /usr/local/src/keepalived-sources
+    args:
+     chdir: /usr/local/src/
+    when: current_version|changed
+
+  - name: Configure sources
+    shell: "./configure --with-kernel-dir=/lib/modules/$(uname -r)/build"
+    args:
+      chdir: /usr/local/src/keepalived-sources/
+    when: current_version|changed
+
+  - name: Make sources
+    shell: make && make install
+    args:
+      chdir: /usr/local/src/keepalived-sources/
+    when: current_version|changed
+
+  - name: Copy init.d from the local to remote
+    copy:
+      src="files/keepalived"
+      dest=/etc/init.d/keepalived
+      mode=0755
+    when: current_version|changed
+
+  - name: Assures "/etc/keepalived" dir exists
+    file: path="/etc/keepalived" state=directory
